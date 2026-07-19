@@ -1,4 +1,3 @@
-// backend/src/routes/bookings.js
 const express = require('express');
 const db = require('../db');
 
@@ -312,7 +311,7 @@ router.patch('/:id/status', async (req, res) => {
 
     const existingResult = await db.query(
       `
-      SELECT id, status, technician_name, admin_note
+      SELECT id, status, technician_name, admin_note, repair_type, payment_status
       FROM bookings
       WHERE id = $1
       LIMIT 1
@@ -362,7 +361,7 @@ router.patch('/:id/status', async (req, res) => {
       UPDATE bookings
       SET status = $1
       WHERE id = $2
-      RETURNING id, status, technician_name, admin_note
+      RETURNING id, status, technician_name, admin_note, repair_type, payment_status
       `,
       [incomingStatus, id]
     );
