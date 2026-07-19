@@ -1,4 +1,5 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const db = require('../db');
 
 const router = express.Router();
@@ -13,6 +14,8 @@ const allowedSlots = [
   '15:00-17:00',
   '17:00-19:00',
 ];
+
+const JWT_SECRET = process.env.JWT_SECRET || 'phonesaathi-dev-secret-change-me';
 
 function isValidIndianPhone(value) {
   const digitsOnly = String(value || '').replace(/\D/g, '');
@@ -74,6 +77,31 @@ function getNextAllowedStatuses(currentStatus) {
   if (normalized === 'completed') return [];
   if (normalized === 'cancelled') return [];
   return [];
+}
+
+function authRequired(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization token is required',
+      });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired token',
+    });
+  }
 }
 
 // CREATE booking
@@ -192,30 +220,62 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET recent bookings (for history/admin)
-router.get('/', async (req, res) => {
+// GET bookings history
+router.get('/', authRequired, async (req, res) => {
   try {
-    const result = await db.query(
-      `
-      SELECT
-        id,
-        booking_code,
-        customer_name,
-        phone_number,
-        city,
-        preferred_date,
-        preferred_slot,
-        created_at,
-        status,
-        technician_name,
-        admin_note,
-        repair_type,
-        payment_status
-      FROM bookings
-      ORDER BY created_at DESC, id DESC
-      LIMIT 20;
-      `
-    );
+    const userRole = String(req.user?.role || 'customer').toLowerCase();
+    const userPhone = normalizePhone(req.user?.phone_number);
+
+    let result;
+
+    if (userRole === 'admin') {
+      result = await db.query(
+        `
+        SELECT
+          id,
+          booking_code,
+          customer_name,
+          phone_number,
+          city,
+          preferred_date,
+          preferred_slot,
+          created_at,
+          status,
+          technician_name,
+          admin_note,
+          repair_type,
+          payment_status
+        FROM bookings
+        ORDER BY created_at DESC, id DESC
+        LIMIT 20;
+        `
+      );
+    } else {
+      result = await db.query(
+        `
+        SELECT
+          id,
+          booking_code,
+          customer_name,
+          phone_number,
+          city,
+          preferred_date,
+          preferred_slot,
+          created_at,
+          status,
+          technician_name,
+          admin_note,
+          repair_type,
+          payment_status
+        FROM bookings
+        WHERE phone_number = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT 20;
+        `,
+        [userPhone]
+      );
+    }
+
     return res.json({
       success: true,
       bookings: result.rows,
@@ -230,9 +290,11 @@ router.get('/', async (req, res) => {
 });
 
 // GET single booking by id
-router.get('/:id', async (req, res) => {
+router.get('/:id', authRequired, async (req, res) => {
   try {
     const id = Number(req.params.id);
+    const userRole = String(req.user?.role || 'customer').toLowerCase();
+    const userPhone = normalizePhone(req.user?.phone_number);
 
     if (Number.isNaN(id)) {
       return res.status(400).json({
@@ -275,9 +337,18 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    const booking = result.rows[0];
+
+    if (userRole !== 'admin' && normalizePhone(booking.phone_number) !== userPhone) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not allowed to view this booking',
+      });
+    }
+
     return res.json({
       success: true,
-      booking: result.rows[0],
+      booking,
     });
   } catch (err) {
     console.error('Get booking by id error:', err);
@@ -289,8 +360,17 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPDATE booking status
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', authRequired, async (req, res) => {
   try {
+    const userRole = String(req.user?.role || 'customer').toLowerCase();
+
+    if (userRole !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admins can update booking status',
+      });
+    }
+
     const id = Number(req.params.id);
     const incomingStatus =
       typeof req.body?.status === 'string' ? req.body.status.trim().toLowerCase() : '';
@@ -381,8 +461,17 @@ router.patch('/:id/status', async (req, res) => {
 });
 
 // UPDATE technician, admin note, repair type, payment status
-router.patch('/:id/admin-meta', async (req, res) => {
+router.patch('/:id/admin-meta', authRequired, async (req, res) => {
   try {
+    const userRole = String(req.user?.role || 'customer').toLowerCase();
+
+    if (userRole !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admins can update admin details',
+      });
+    }
+
     const id = Number(req.params.id);
     const { technician_name, admin_note, repair_type, payment_status } = req.body;
 
