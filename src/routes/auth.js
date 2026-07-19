@@ -104,18 +104,13 @@ router.post('/login', async (req, res) => {
       [phone_number, otpHash, expiresAt]
     );
 
-    const response = {
+    return res.json({
       success: true,
       message: 'OTP sent successfully',
       phone_number,
       expires_in_minutes: OTP_EXPIRY_MINUTES,
-    };
-
-    if (process.env.NODE_ENV !== 'production') {
-      response.dev_otp = otp;
-    }
-
-    return res.json(response);
+      dev_otp: otp,
+    });
   } catch (err) {
     console.error('Auth login error:', err);
     return res.status(500).json({
