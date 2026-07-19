@@ -1,13 +1,8 @@
 // backend/src/routes/bookings.js
 const express = require('express');
-const { Pool } = require('pg');
+const db = require('../db');
 
 const router = express.Router();
-
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL,
-  });
 
 const allowedStatuses = ['pending', 'pending_confirmation', 'assigned', 'completed', 'cancelled'];
 const allowedRepairTypes = ['onsite', 'workshop'];
@@ -61,7 +56,7 @@ function generateBookingCode() {
 async function createUniqueBookingCode(maxAttempts = 5) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const code = generateBookingCode();
-    const existing = await pool.query(
+    const existing = await db.query(
       'SELECT id FROM bookings WHERE booking_code = $1 LIMIT 1',
       [code]
     );
@@ -180,7 +175,7 @@ router.post('/', async (req, res) => {
       bookingCode,
     ];
 
-    const result = await pool.query(insertQuery, values);
+    const result = await db.query(insertQuery, values);
     const row = result.rows[0];
 
     return res.status(201).json({
@@ -201,7 +196,7 @@ router.post('/', async (req, res) => {
 // GET recent bookings (for history/admin)
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `
       SELECT
         id,
@@ -247,7 +242,7 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const result = await pool.query(
+    const result = await db.query(
       `
       SELECT
         id,
@@ -315,7 +310,7 @@ router.patch('/:id/status', async (req, res) => {
       });
     }
 
-    const existingResult = await pool.query(
+    const existingResult = await db.query(
       `
       SELECT id, status, technician_name, admin_note
       FROM bookings
@@ -362,7 +357,7 @@ router.patch('/:id/status', async (req, res) => {
       });
     }
 
-    const result = await pool.query(
+    const result = await db.query(
       `
       UPDATE bookings
       SET status = $1
@@ -412,7 +407,7 @@ router.patch('/:id/admin-meta', async (req, res) => {
         ? payment_status
         : null;
 
-    const result = await pool.query(
+    const result = await db.query(
       `
       UPDATE bookings
       SET
