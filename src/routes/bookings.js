@@ -104,8 +104,29 @@ function authRequired(req, res, next) {
   }
 }
 
+function authOptional(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+
+    if (!token) {
+      req.user = null;
+      return next();
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    return next();
+  } catch (err) {
+    req.user = null;
+    return next();
+  }
+}
+
 // CREATE booking
-router.post('/', async (req, res) => {
+router.post('/', authOptional, async (req, res) => {
   try {
     const {
       customer_name,
@@ -121,7 +142,6 @@ router.post('/', async (req, res) => {
     } = req.body;
 
     const cleanedCustomerName = normalizeRequiredText(customer_name);
-    const cleanedPhoneNumber = normalizePhone(phone_number);
     const cleanedCategoryId = normalizeOptionalText(category_id);
     const cleanedDeviceBrand = normalizeOptionalText(device_brand);
     const cleanedDeviceModel = normalizeOptionalText(device_model);
@@ -132,6 +152,10 @@ router.post('/', async (req, res) => {
       typeof preferred_date === 'string' ? preferred_date.trim() : '';
     const cleanedPreferredSlot =
       typeof preferred_slot === 'string' ? preferred_slot.trim() : '';
+
+    const authenticatedPhone = normalizePhone(req.user?.phone_number);
+    const incomingPhone = normalizePhone(phone_number);
+    const cleanedPhoneNumber = authenticatedPhone || incomingPhone;
 
     if (
       !cleanedCustomerName ||

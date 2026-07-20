@@ -8,6 +8,7 @@ const router = express.Router();
 const OTP_EXPIRY_MINUTES = Number(process.env.OTP_EXPIRY_MINUTES || 5);
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const JWT_SECRET = process.env.JWT_SECRET || 'phonesaathi-dev-secret-change-me';
+const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 
 function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 10);
@@ -104,13 +105,18 @@ router.post('/login', async (req, res) => {
       [phone_number, otpHash, expiresAt]
     );
 
-    return res.json({
+    const responsePayload = {
       success: true,
       message: 'OTP sent successfully',
       phone_number,
       expires_in_minutes: OTP_EXPIRY_MINUTES,
-      dev_otp: otp,
-    });
+    };
+
+    if (!IS_PRODUCTION) {
+      responsePayload.dev_otp = otp;
+    }
+
+    return res.json(responsePayload);
   } catch (err) {
     console.error('Auth login error:', err);
     return res.status(500).json({
@@ -256,9 +262,18 @@ router.get('/me', authRequired, async (req, res) => {
       });
     }
 
+    const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        message: 'This account is inactive',
+      });
+    }
+
     return res.json({
       success: true,
-      user: result.rows[0],
+      user,
     });
   } catch (err) {
     console.error('Get auth me error:', err);
