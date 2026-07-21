@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const admin = require('firebase-admin');
 const db = require('../db');
 
 const router = express.Router();
@@ -9,6 +10,18 @@ const OTP_EXPIRY_MINUTES = Number(process.env.OTP_EXPIRY_MINUTES || 5);
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const JWT_SECRET = process.env.JWT_SECRET || 'phonesaathi-dev-secret-change-me';
 const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY
+        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        : undefined,
+    }),
+  });
+}
 
 function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 10);
@@ -66,6 +79,80 @@ function authRequired(req, res, next) {
     });
   }
 }
+
+router.post('/firebase-login', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const firebaseToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+
+    if (!firebaseToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'Firebase ID token is required',
+      });
+    }
+
+    const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
+    const firebasePhone = decodedToken.phone_number || '';
+    const phone_number = normalizePhone(firebasePhone);
+
+    if (!isValidIndianPhone(phone_number)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verified Firebase phone number is invalid',
+      });
+    }
+
+    let userResult = await db.query(
+      `
+      SELECT id, phone_number, name, role, is_active, created_at
+      FROM users
+      WHERE phone_number = $1
+      LIMIT 1
+      `,
+      [phone_number]
+    );
+
+    let user = userResult.rows[0];
+
+    if (!user) {
+      const insertUserResult = await db.query(
+        `
+        INSERT INTO users (phone_number, role)
+        VALUES ($1, 'customer')
+        RETURNING id, phone_number, name, role, is_active, created_at
+        `,
+        [phone_number]
+      );
+      user = insertUserResult.rows[0];
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        message: 'This account is inactive',
+      });
+    }
+
+    const token = signUserToken(user);
+
+    return res.json({
+      success: true,
+      message: 'Firebase login successful',
+      token,
+      user,
+      firebase_uid: decodedToken.uid,
+    });
+  } catch (err) {
+    console.error('Firebase login error:', err);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired Firebase token',
+    });
+  }
+});
 
 router.post('/login', async (req, res) => {
   try {

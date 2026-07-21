@@ -20,6 +20,7 @@ app.get('/', (req, res) => {
       bookings: '/api/bookings',
       authLogin: '/api/auth/login',
       authVerifyOtp: '/api/auth/verify-login-otp',
+      authFirebaseLogin: '/api/auth/firebase-login',
       authMe: '/api/auth/me',
     },
   });
